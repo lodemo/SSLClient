@@ -22,12 +22,10 @@
 #include "IPAddress.h"
 #include "ssl_client.h"
 
-using internal;
-
 class SSLClient : public Client
 {
 protected:
-    sslclient_context *sslclient;
+    internal::sslclient_context *sslclient;
  
     int _lastError = 0;
 	int _peek = -1;
