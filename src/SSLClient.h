@@ -35,8 +35,10 @@ protected:
     const char *_private_key;
     const char *_pskIdent; // identity for PSK cipher suites
     const char *_psKey; // key in hex for PSK cipher suites
+    const char **_alpn_protos;
 
     bool _connected = false;
+    bool _use_insecure;
 
     Client* _client = nullptr;
 
@@ -64,7 +66,7 @@ public:
     void stop();
     uint8_t connected();
     int lastError(char *buf, const size_t size);
-
+    void setInsecure(); // Don't validate the chain, just accept whatever is given.  VERY INSECURE!
     void setPreSharedKey(const char *pskIdent, const char *psKey); // psKey in Hex
     void setCACert(const char *rootCA);
     void setCertificate(const char *client_ca);
@@ -74,7 +76,7 @@ public:
     bool loadPrivateKey(Stream& stream, size_t size);
     bool verify(const char* fingerprint, const char* domain_name);
     void setHandshakeTimeout(unsigned long handshake_timeout);
-
+    void setAlpnProtocols(const char **alpn_protos);
     int setTimeout(uint32_t seconds){ return 0; }
 
     operator bool()
