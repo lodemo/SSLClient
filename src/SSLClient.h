@@ -20,7 +20,7 @@
 #define SSLClient_H
 #include "Arduino.h"
 #include "IPAddress.h"
-#include "internal/ssl_client.h"
+#include "ssl_client.h"
 
 class SSLClient : public Client
 {
