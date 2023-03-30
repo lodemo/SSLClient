@@ -30,8 +30,10 @@ SSLClient::SSLClient()
     _timeout = 0;
 
     sslclient = new sslclient_context;
-    ssl_init(sslclient, nullptr);
+    ssl_init(sslclient);
+    sslclient->client = nullptr;
     sslclient->handshake_timeout = 120000;
+
     _CA_cert = NULL;
     _cert = NULL;
     _private_key = NULL;
@@ -41,14 +43,16 @@ SSLClient::SSLClient()
     _alpn_protos = NULL;
 }
 
-SSLClient::SSLClient(Client* client)
+SSLClient::SSLClient(Client& client)
 {
     _connected = false;
     _timeout = 0;
 
     sslclient = new sslclient_context;
-    ssl_init(sslclient, client);
+    ssl_init(sslclient);
+    sslclient->client = &client;
     sslclient->handshake_timeout = 120000;
+
     _CA_cert = NULL;
     _cert = NULL;
     _private_key = NULL;

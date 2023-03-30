@@ -4,6 +4,7 @@
 *
 * Original Copyright (C) 2006-2015, ARM Limited, All Rights Reserved, Apache 2.0 License.
 * Additions Copyright (C) 2017 Evandro Luis Copercini, Apache 2.0 License.
+* Conversion to Client Copyright (c) 2021 Stanislav Galabov, Apache 2.0 License.
 */
 
 #include "Arduino.h"
@@ -17,11 +18,9 @@
 #include <algorithm>
 #include <string>
 #include "ssl_client.h"
-#include "esp_crt_bundle.h"
-#include "WiFi.h"
 
 #if !defined(MBEDTLS_KEY_EXCHANGE__SOME__PSK_ENABLED) && !defined(MBEDTLS_KEY_EXCHANGE_SOME_PSK_ENABLED)
-#  warning "Please call `idf.py menuconfig` then go to Component config -> mbedTLS -> TLS Key Exchange Methods -> Enable pre-shared-key ciphersuites and then check `Enable PSK based cyphersuite modes`. Save and Quit."
+#  warning "Please configure IDF framework to include mbedTLS -> Enable pre-shared-key ciphersuites and activate at least one cipher"
 #else
 
 const char *pers = "esp32-tls";
@@ -43,6 +42,28 @@ static int _handle_error(int err, const char * function, int line)
 
 #define handle_error(e) _handle_error(e, __FUNCTION__, __LINE__)
 
+static int client_recv_timeout(void *ctx, unsigned char *buf, size_t len, uint32_t timeout ) {
+    Client *client = reinterpret_cast<Client *>(ctx);
+
+    unsigned long target = millis() + timeout;
+    do {
+        if (client->available() < len && timeout > 0) {
+            delay(1);
+        } else {
+            break;
+        }
+    } while (millis() < target);
+
+    int res = client->read(buf, len);
+
+    return (res == 0) ? MBEDTLS_ERR_SSL_WANT_READ : res;
+}
+
+static int client_send(void *ctx, const unsigned char *buf, size_t len ) {
+    Client *client = reinterpret_cast<Client *>(ctx);
+
+    return client->write(buf, len);
+}
 
 void ssl_init(sslclient_context *ssl_client)
 {
@@ -54,97 +75,27 @@ void ssl_init(sslclient_context *ssl_client)
 }
 
 
-int start_ssl_client(sslclient_context *ssl_client, const char *host, uint32_t port, int timeout, const char *rootCABuff, bool useRootCABundle, const char *cli_cert, const char *cli_key, const char *pskIdent, const char *psKey, bool insecure, const char **alpn_protos)
+int start_ssl_client(sslclient_context *ssl_client, const char *host, uint32_t port, int timeout, const char *rootCABuff, const char *cli_cert, const char *cli_key, const char *pskIdent, const char *psKey, bool insecure, const char **alpn_protos)
 {
     char buf[512];
     int ret, flags;
     int enable = 1;
     log_v("Free internal heap before TLS %u", ESP.getFreeHeap());
 
-    if (rootCABuff == NULL && pskIdent == NULL && psKey == NULL && !insecure && !useRootCABundle) {
+    if (rootCABuff == NULL && pskIdent == NULL && psKey == NULL && !insecure) {
         return -1;
     }
 
-    log_v("Starting socket");
-    ssl_client->socket = -1;
-
-    ssl_client->socket = lwip_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (ssl_client->socket < 0) {
-        log_e("ERROR opening socket");
-        return ssl_client->socket;
+    log_v("Starting client");
+    if (!ssl_client->client) {
+      log_e("Client not initialized");
+      return -1;
     }
 
-    IPAddress srv((uint32_t)0);
-    if(!WiFiGenericClass::hostByName(host, srv)){
-        return -1;
+    if (!ssl_client->client->connect(host, port)) {
+      log_e("Failed to connect to server");
+      return -2;
     }
-
-    fcntl( ssl_client->socket, F_SETFL, fcntl( ssl_client->socket, F_GETFL, 0 ) | O_NONBLOCK );
-    struct sockaddr_in serv_addr;
-    memset(&serv_addr, 0, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_addr.s_addr = srv;
-    serv_addr.sin_port = htons(port);
-
-    if(timeout <= 0){
-        timeout = 30000; // Milli seconds.
-    }
-
-    fd_set fdset;
-    struct timeval tv;
-    FD_ZERO(&fdset);
-    FD_SET(ssl_client->socket, &fdset);
-    tv.tv_sec = timeout / 1000;
-    tv.tv_usec = (timeout % 1000) * 1000;
-
-    int res = lwip_connect(ssl_client->socket, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
-    if (res < 0 && errno != EINPROGRESS) {
-        log_e("connect on fd %d, errno: %d, \"%s\"", ssl_client->socket, errno, strerror(errno));
-        lwip_close(ssl_client->socket);
-        ssl_client->socket = -1;
-        return -1;
-    }
-
-    res = select(ssl_client->socket + 1, nullptr, &fdset, nullptr, timeout<0 ? nullptr : &tv);
-    if (res < 0) {
-        log_e("select on fd %d, errno: %d, \"%s\"", ssl_client->socket, errno, strerror(errno));
-        lwip_close(ssl_client->socket);
-        ssl_client->socket = -1;
-        return -1;
-    } else if (res == 0) {
-        log_i("select returned due to timeout %d ms for fd %d", timeout, ssl_client->socket);
-        lwip_close(ssl_client->socket);
-        ssl_client->socket = -1;
-        return -1;
-    } else {
-        int sockerr;
-        socklen_t len = (socklen_t)sizeof(int);
-        res = getsockopt(ssl_client->socket, SOL_SOCKET, SO_ERROR, &sockerr, &len);
-
-        if (res < 0) {
-            log_e("getsockopt on fd %d, errno: %d, \"%s\"", ssl_client->socket, errno, strerror(errno));
-            lwip_close(ssl_client->socket);
-            ssl_client->socket = -1;
-            return -1;
-        }
-
-        if (sockerr != 0) {
-            log_e("socket error on fd %d, errno: %d, \"%s\"", ssl_client->socket, sockerr, strerror(sockerr));
-            lwip_close(ssl_client->socket);
-            ssl_client->socket = -1;
-            return -1;
-        }
-    }
-
-
-#define ROE(x,msg) { if (((x)<0)) { log_e("LWIP Socket config of " msg " failed."); return -1; }}
-     ROE(lwip_setsockopt(ssl_client->socket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)),"SO_RCVTIMEO");
-     ROE(lwip_setsockopt(ssl_client->socket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)),"SO_SNDTIMEO");
-
-     ROE(lwip_setsockopt(ssl_client->socket, IPPROTO_TCP, TCP_NODELAY, &enable, sizeof(enable)),"TCP_NODELAY");
-     ROE(lwip_setsockopt(ssl_client->socket, SOL_SOCKET, SO_KEEPALIVE, &enable, sizeof(enable)),"SO_KEEPALIVE");
-
-
 
     log_v("Seeding the random number generator");
     mbedtls_entropy_init(&ssl_client->entropy_ctx);
@@ -176,7 +127,7 @@ int start_ssl_client(sslclient_context *ssl_client, const char *host, uint32_t p
 
     if (insecure) {
         mbedtls_ssl_conf_authmode(&ssl_client->ssl_conf, MBEDTLS_SSL_VERIFY_NONE);
-        log_d("WARNING: Skipping SSL Verification. INSECURE!");
+        log_i("WARNING: Skipping SSL Verification. INSECURE!");
     } else if (rootCABuff != NULL) {
         log_v("Loading CA cert");
         mbedtls_x509_crt_init(&ssl_client->ca_cert);
@@ -187,13 +138,6 @@ int start_ssl_client(sslclient_context *ssl_client, const char *host, uint32_t p
         if (ret < 0) {
             // free the ca_cert in the case parse failed, otherwise, the old ca_cert still in the heap memory, that lead to "out of memory" crash.
             mbedtls_x509_crt_free(&ssl_client->ca_cert);
-            return handle_error(ret);
-        }
-    } else if (useRootCABundle) {
-        log_v("Attaching root CA cert bundle");
-        ret = esp_crt_bundle_attach(&ssl_client->ssl_conf);
-
-        if (ret < 0) {
             return handle_error(ret);
         }
     } else if (pskIdent != NULL && psKey != NULL) {
@@ -267,7 +211,7 @@ int start_ssl_client(sslclient_context *ssl_client, const char *host, uint32_t p
         return handle_error(ret);
     }
 
-    mbedtls_ssl_set_bio(&ssl_client->ssl_ctx, &ssl_client->socket, mbedtls_net_send, mbedtls_net_recv, NULL );
+    mbedtls_ssl_set_bio(&ssl_client->ssl_ctx, ssl_client->client, client_send, NULL, client_recv_timeout);
 
     log_v("Performing the SSL/TLS handshake...");
     unsigned long handshake_start_time=millis();
@@ -300,7 +244,7 @@ int start_ssl_client(sslclient_context *ssl_client, const char *host, uint32_t p
     } else {
         log_v("Certificate verified.");
     }
-    
+
     if (rootCABuff != NULL) {
         mbedtls_x509_crt_free(&ssl_client->ca_cert);
     }
@@ -311,11 +255,11 @@ int start_ssl_client(sslclient_context *ssl_client, const char *host, uint32_t p
 
     if (cli_key != NULL) {
         mbedtls_pk_free(&ssl_client->client_key);
-    }    
+    }
 
     log_v("Free internal heap after TLS %u", ESP.getFreeHeap());
 
-    return ssl_client->socket;
+    return 1;
 }
 
 
@@ -323,10 +267,7 @@ void stop_ssl_socket(sslclient_context *ssl_client, const char *rootCABuff, cons
 {
     log_v("Cleaning SSL connection.");
 
-    if (ssl_client->socket >= 0) {
-        lwip_close(ssl_client->socket);
-        ssl_client->socket = -1;
-    }
+    ssl_client->client->stop();
 
     // avoid memory leak if ssl connection attempt failed
     if (ssl_client->ssl_conf.ca_chain != NULL) {
@@ -340,13 +281,9 @@ void stop_ssl_socket(sslclient_context *ssl_client, const char *rootCABuff, cons
     mbedtls_ssl_config_free(&ssl_client->ssl_conf);
     mbedtls_ctr_drbg_free(&ssl_client->drbg_ctx);
     mbedtls_entropy_free(&ssl_client->entropy_ctx);
-    
-    // save only interesting field
-    int timeout = ssl_client->handshake_timeout;
     // reset embedded pointers to zero
     memset(ssl_client, 0, sizeof(sslclient_context));
-    
-    ssl_client->handshake_timeout = timeout;
+    ssl_client->client = nullptr;
 }
 
 
@@ -457,7 +394,7 @@ bool verify_ssl_fingerprint(sslclient_context *ssl_client, const char* fp, const
 
     // Calculate certificate's SHA256 fingerprint
     uint8_t fingerprint_remote[32];
-    if(!get_peer_fingerprint(ssl_client, fingerprint_remote)) 
+    if(!get_peer_fingerprint(ssl_client, fingerprint_remote))
         return false;
 
     // Check if fingerprints match
@@ -474,7 +411,7 @@ bool verify_ssl_fingerprint(sslclient_context *ssl_client, const char* fp, const
         return true;
 }
 
-bool get_peer_fingerprint(sslclient_context *ssl_client, uint8_t sha256[32]) 
+bool get_peer_fingerprint(sslclient_context *ssl_client, uint8_t sha256[32])
 {
     if (!ssl_client) {
         log_d("Invalid ssl_client pointer");
@@ -544,4 +481,3 @@ bool verify_ssl_dn(sslclient_context *ssl_client, const char* domain_name)
     return false;
 }
 #endif
-

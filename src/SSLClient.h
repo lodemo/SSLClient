@@ -40,11 +40,9 @@ protected:
     bool _connected = false;
     bool _use_insecure;
 
-    Client* _client = nullptr;
-
 public:
     SSLClient();
-    SSLClient(Client* client);
+    SSLClient(Client& client);
     ~SSLClient();
 
     int connect(IPAddress ip, uint16_t port);
