@@ -2,8 +2,8 @@
  * by Evandro Copercini - 2017 - Apache 2.0 License
  */
 
-#ifndef ARD_SSL_H
-#define ARD_SSL_H
+#ifndef INTERNAL_ARD_SSL_H
+#define INTERNAL_ARD_SSL_H
 #include "mbedtls/platform.h"
 #include "mbedtls/net.h"
 #include "mbedtls/debug.h"
@@ -14,6 +14,8 @@
 
 #include <Client.h>
 
+namespace internal {
+ 
 typedef struct sslclient_context {
     Client *client;
     mbedtls_ssl_context ssl_ctx;
@@ -39,4 +41,7 @@ int get_ssl_receive(sslclient_context *ssl_client, uint8_t *data, int length);
 bool verify_ssl_fingerprint(sslclient_context *ssl_client, const char* fp, const char* domain_name);
 bool verify_ssl_dn(sslclient_context *ssl_client, const char* domain_name);
 bool get_peer_fingerprint(sslclient_context *ssl_client, uint8_t sha256[32]);
+   
+}
+
 #endif

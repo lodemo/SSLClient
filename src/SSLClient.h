@@ -22,6 +22,8 @@
 #include "IPAddress.h"
 #include "ssl_client.h"
 
+using internal;
+
 class SSLClient : public Client
 {
 protected:
