@@ -14,7 +14,7 @@
 
 #include <Client.h>
 
-namespace internal {
+namespace SSLClientContext {
  
 typedef struct sslclient_context {
     Client *client;
