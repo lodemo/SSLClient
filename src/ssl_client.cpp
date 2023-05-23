@@ -283,9 +283,6 @@ void stop_ssl_socket(sslclient_context *ssl_client, const char *rootCABuff, cons
     mbedtls_ssl_config_free(&ssl_client->ssl_conf);
     mbedtls_ctr_drbg_free(&ssl_client->drbg_ctx);
     mbedtls_entropy_free(&ssl_client->entropy_ctx);
-    // reset embedded pointers to zero
-    memset(ssl_client, 0, sizeof(sslclient_context));
-    ssl_client->client = nullptr;
 }
 
 
