@@ -23,42 +23,34 @@
 #undef write
 #undef read
 
+
 SSLClient::SSLClient()
 {
     _connected = false;
-    _timeout = 0;
 
     sslclient = new SSLClientContext::sslclient_context;
-    ssl_init(sslclient);
-    sslclient->client = nullptr;
+    ssl_init(sslclient, nullptr);
     sslclient->handshake_timeout = 120000;
-
     _CA_cert = NULL;
     _cert = NULL;
     _private_key = NULL;
     _pskIdent = NULL;
     _psKey = NULL;
-    _use_insecure = false;
-    _alpn_protos = NULL;
 }
 
-SSLClient::SSLClient(Client& client)
+SSLClient::SSLClient(Client* client)
 {
     _connected = false;
-    _timeout = 0;
 
     sslclient = new SSLClientContext::sslclient_context;
-    ssl_init(sslclient);
-    sslclient->client = &client;
+    ssl_init(sslclient, client);
     sslclient->handshake_timeout = 120000;
-
     _CA_cert = NULL;
     _cert = NULL;
     _private_key = NULL;
     _pskIdent = NULL;
     _psKey = NULL;
-    _use_insecure = false;
-    _alpn_protos = NULL;
+
 }
 
 SSLClient::~SSLClient()
@@ -67,13 +59,19 @@ SSLClient::~SSLClient()
     delete sslclient;
 }
 
-void SSLClient::stop()
-{
+void SSLClient::stop() {
     if (sslclient->client != nullptr) {
-        _connected = false;
-        _peek = -1;
-        SSLClientContext::stop_ssl_socket(sslclient, _CA_cert, _cert, _private_key);
+        if (sslclient->client >= 0) {
+            log_v("Stopping ssl client");
+            SSLClientContext::stop_ssl_socket(sslclient, _CA_cert, _cert, _private_key);
+        } else {
+            log_v("stop() not called because client is < 0");
+        }
+    } else {
+        log_v("stop() not called because client is nullptr");
     }
+     _connected = false;
+    _peek = -1;
 }
 
 int SSLClient::connect(IPAddress ip, uint16_t port)
@@ -111,7 +109,7 @@ int SSLClient::connect(const char *host, uint16_t port, const char *_CA_cert, co
     if(_timeout > 0){
         sslclient->handshake_timeout = _timeout;
     }
-    int ret = SSLClientContext::start_ssl_client(sslclient, host, port, _timeout, _CA_cert, _cert, _private_key, NULL, NULL, _use_insecure, _alpn_protos);
+    int ret = SSLClientContext::start_ssl_client(sslclient, host, port, _timeout, _CA_cert, _cert, _private_key, NULL, NULL);
     _lastError = ret;
     if (ret < 0) {
         log_e("start_ssl_client: %d", ret);
@@ -133,7 +131,7 @@ int SSLClient::connect(const char *host, uint16_t port, const char *pskIdent, co
     if(_timeout > 0){
         sslclient->handshake_timeout = _timeout;
     }
-    int ret = SSLClientContext::start_ssl_client(sslclient, host, port, _timeout, NULL, NULL, NULL, _pskIdent, _psKey, _use_insecure, _alpn_protos);
+    int ret = SSLClientContext::start_ssl_client(sslclient, host, port, _timeout, NULL, NULL, NULL, _pskIdent, _psKey);
     _lastError = ret;
     if (ret < 0) {
         log_e("start_ssl_client: %d", ret);
@@ -201,7 +199,7 @@ int SSLClient::read(uint8_t *buf, size_t size)
         buf++;
         peeked = 1;
     }
-    
+
     int res = SSLClientContext::get_ssl_receive(sslclient, buf, size);
     if (res < 0) {
         stop();
@@ -230,16 +228,6 @@ uint8_t SSLClient::connected()
     read(&dummy, 0);
 
     return _connected;
-}
-
-void SSLClient::setInsecure()
-{
-    _CA_cert = NULL;
-    _cert = NULL;
-    _private_key = NULL;
-    _pskIdent = NULL;
-    _psKey = NULL;
-    _use_insecure = true;
 }
 
 void SSLClient::setCACert (const char *rootCA)
@@ -275,16 +263,18 @@ bool SSLClient::verify(const char* fp, const char* domain_name)
 }
 
 char *SSLClient::_streamLoad(Stream& stream, size_t size) {
-  char *dest = (char*)malloc(size+1);
+  static char *dest = nullptr;
+  if(dest) {
+      free(dest);
+  }
+  dest = (char*)malloc(size);
   if (!dest) {
     return nullptr;
   }
   if (size != stream.readBytes(dest, size)) {
     free(dest);
     dest = nullptr;
-    return nullptr;
   }
-  dest[size] = '\0';
   return dest;
 }
 
@@ -323,7 +313,9 @@ int SSLClient::lastError(char *buf, const size_t size)
     if (!_lastError) {
         return 0;
     }
-    mbedtls_strerror(_lastError, buf, size);
+    char error_buf[100];
+    mbedtls_strerror(_lastError, error_buf, 100);
+    snprintf(buf, size, "%s", error_buf);
     return _lastError;
 }
 
@@ -332,7 +324,6 @@ void SSLClient::setHandshakeTimeout(unsigned long handshake_timeout)
     sslclient->handshake_timeout = handshake_timeout * 1000;
 }
 
-void SSLClient::setAlpnProtocols(const char **alpn_protos)
-{
-    _alpn_protos = alpn_protos;
+void SSLClient::setClient(Client* client){
+    sslclient->client = client;
 }
