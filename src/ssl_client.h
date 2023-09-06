@@ -3,8 +3,8 @@
  * Additions Copyright (C) 2019 Vadim Govorovski.
  */
 
-#ifndef ARD_SSL_H
-#define ARD_SSL_H
+#ifndef INTERNAL_ARD_SSL_H
+#define INTERNAL_ARD_SSL_H
 #include "mbedtls/platform.h"
 #include "mbedtls/net.h"
 #include "mbedtls/debug.h"
