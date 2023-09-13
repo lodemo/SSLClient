@@ -18,6 +18,7 @@
 
 #include "SSLClient.h"
 #include <errno.h>
+#include "esp_crt_bundle.h"
 
 #undef connect
 #undef write
@@ -36,6 +37,8 @@ SSLClient::SSLClient()
     _private_key = NULL;
     _pskIdent = NULL;
     _psKey = NULL;
+     _alpn_protos = NULL;
+    _use_insecure = false;
 }
 
 SSLClient::SSLClient(Client* client)
@@ -50,7 +53,8 @@ SSLClient::SSLClient(Client* client)
     _private_key = NULL;
     _pskIdent = NULL;
     _psKey = NULL;
-
+    _alpn_protos = NULL;
+    _use_insecure = false;
 }
 
 SSLClient::~SSLClient()
@@ -109,7 +113,7 @@ int SSLClient::connect(const char *host, uint16_t port, const char *_CA_cert, co
     if(_timeout > 0){
         sslclient->handshake_timeout = _timeout;
     }
-    int ret = SSLClientContext::start_ssl_client(sslclient, host, port, _timeout, _CA_cert, _cert, _private_key, NULL, NULL);
+    int ret = SSLClientContext::start_ssl_client(sslclient, host, port, _timeout, _CA_cert, _use_ca_bundle, _cert, _private_key, NULL, NULL, _use_insecure, _alpn_protos);
     _lastError = ret;
     if (ret < 0) {
         log_e("start_ssl_client: %d", ret);
@@ -131,7 +135,7 @@ int SSLClient::connect(const char *host, uint16_t port, const char *pskIdent, co
     if(_timeout > 0){
         sslclient->handshake_timeout = _timeout;
     }
-    int ret = SSLClientContext::start_ssl_client(sslclient, host, port, _timeout, NULL, NULL, NULL, _pskIdent, _psKey);
+    int ret = SSLClientContext::start_ssl_client(sslclient, host, port, _timeout, NULL, NULL, NULL, _pskIdent, _psKey, _use_insecure, _alpn_protos);
     _lastError = ret;
     if (ret < 0) {
         log_e("start_ssl_client: %d", ret);
@@ -230,10 +234,33 @@ uint8_t SSLClient::connected()
     return _connected;
 }
 
+void WiFiClientSecure::setInsecure()
+{
+    _CA_cert = NULL;
+    _cert = NULL;
+    _private_key = NULL;
+    _pskIdent = NULL;
+    _psKey = NULL;
+    _use_insecure = true;
+}
+
 void SSLClient::setCACert (const char *rootCA)
 {
     log_d("Set root CA");
     _CA_cert = rootCA;
+    _use_insecure = false;
+}
+
+void WiFiClientSecure::setCACertBundle(const uint8_t * bundle)
+{
+    if (bundle != NULL)
+    {
+        arduino_esp_crt_bundle_set(bundle);
+        _use_ca_bundle = true;
+    } else {
+        arduino_esp_crt_bundle_detach(NULL);
+        _use_ca_bundle = false;
+    }
 }
 
 void SSLClient::setCertificate (const char *client_ca)
@@ -322,6 +349,11 @@ int SSLClient::lastError(char *buf, const size_t size)
 void SSLClient::setHandshakeTimeout(unsigned long handshake_timeout)
 {
     sslclient->handshake_timeout = handshake_timeout * 1000;
+}
+
+void WiFiClientSecure::setAlpnProtocols(const char **alpn_protos)
+{
+    _alpn_protos = alpn_protos;
 }
 
 void SSLClient::setClient(Client* client){

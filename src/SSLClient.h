@@ -30,11 +30,14 @@ protected:
     int _lastError = 0;
 	int _peek = -1;
     int _timeout = 0;
+    bool _use_insecure;
     const char *_CA_cert;
     const char *_cert;
     const char *_private_key;
     const char *_pskIdent; // identity for PSK cipher suites
     const char *_psKey; // key in hex for PSK cipher suites
+    const char **_alpn_protos;
+    bool _use_ca_bundle;
 
     bool _connected = false;
 
@@ -64,6 +67,7 @@ public:
     void stop();
     uint8_t connected();
     int lastError(char *buf, const size_t size);
+    void setInsecure(); // Don't validate the chain, just accept whatever is given.  VERY INSECURE!
 
     void setPreSharedKey(const char *pskIdent, const char *psKey); // psKey in Hex
     void setCACert(const char *rootCA);
@@ -75,7 +79,13 @@ public:
     bool verify(const char* fingerprint, const char* domain_name);
     void setHandshakeTimeout(unsigned long handshake_timeout);
     void setClient(Client* client);
+    void setAlpnProtocols(const char **alpn_protos);
 
+    int setTimeout(uint32_t seconds);
+    void setCACertBundle(const uint8_t * bundle);
+
+    const mbedtls_x509_crt* getPeerCertificate() { return mbedtls_ssl_get_peer_cert(&sslclient->ssl_ctx); };
+    bool getFingerprintSHA256(uint8_t sha256_result[32]) { return get_peer_fingerprint(sslclient, sha256_result); };
 
     int setTimeout(uint32_t seconds){ return 0; }
 

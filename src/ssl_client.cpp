@@ -155,12 +155,16 @@ void ssl_init(sslclient_context *ssl_client, Client *client)
 }
 
 
-int start_ssl_client(sslclient_context *ssl_client, const char *host, uint32_t port, int timeout, const char *rootCABuff, const char *cli_cert, const char *cli_key, const char *pskIdent, const char *psKey)
+int start_ssl_client(sslclient_context *ssl_client, const char *host, uint32_t port, int timeout, const char *rootCABuff, bool useRootCABundle, const char *cli_cert, const char *cli_key, const char *pskIdent, const char *psKey, bool insecure, const char **alpn_protos)
 {
     char buf[512];
     int ret, flags;
     //int enable = 1;
     log_v("Free internal heap before TLS %u", ESP.getFreeHeap());
+
+    if (rootCABuff == NULL && pskIdent == NULL && psKey == NULL && !insecure && !useRootCABundle) {
+        return -1;
+    }
 
     log_d("Connecting to %s:%d", host, port);
 
@@ -194,16 +198,33 @@ int start_ssl_client(sslclient_context *ssl_client, const char *host, uint32_t p
         return handle_error(ret);
     }
 
+    if (alpn_protos != NULL) {
+        log_v("Setting ALPN protocols");
+        if ((ret = mbedtls_ssl_conf_alpn_protocols(&ssl_client->ssl_conf, alpn_protos) ) != 0) {
+            return handle_error(ret);
+        }
+    }
+
     // MBEDTLS_SSL_VERIFY_REQUIRED if a CA certificate is defined on Arduino IDE and
     // MBEDTLS_SSL_VERIFY_NONE if not.
 
-    if (rootCABuff != NULL) {
+    if (insecure) {
+        mbedtls_ssl_conf_authmode(&ssl_client->ssl_conf, MBEDTLS_SSL_VERIFY_NONE);
+        log_d("WARNING: Skipping SSL Verification. INSECURE!");
+    } else if (rootCABuff != NULL) {
         log_v("Loading CA cert");
         mbedtls_x509_crt_init(&ssl_client->ca_cert);
         mbedtls_ssl_conf_authmode(&ssl_client->ssl_conf, MBEDTLS_SSL_VERIFY_REQUIRED);
         ret = mbedtls_x509_crt_parse(&ssl_client->ca_cert, (const unsigned char *)rootCABuff, strlen(rootCABuff) + 1);
         mbedtls_ssl_conf_ca_chain(&ssl_client->ssl_conf, &ssl_client->ca_cert, NULL);
         //mbedtls_ssl_conf_verify(&ssl_client->ssl_ctx, my_verify, NULL );
+        if (ret < 0) {
+            return handle_error(ret);
+        }
+    } else if (useRootCABundle) {
+        log_v("Attaching root CA cert bundle");
+        ret = arduino_esp_crt_bundle_attach(&ssl_client->ssl_conf);
+
         if (ret < 0) {
             return handle_error(ret);
         }
@@ -238,11 +259,10 @@ int start_ssl_client(sslclient_context *ssl_client, const char *host, uint32_t p
             return handle_error(ret);
         }
     } else {
-        mbedtls_ssl_conf_authmode(&ssl_client->ssl_conf, MBEDTLS_SSL_VERIFY_NONE);
-        log_i("WARNING: Use certificates for a more secure communication!");
+        return -1;
     }
 
-    if (cli_cert != NULL && cli_key != NULL) {
+    if (!insecure && cli_cert != NULL && cli_key != NULL) {
         mbedtls_x509_crt_init(&ssl_client->client_cert);
         mbedtls_pk_init(&ssl_client->client_key);
 
@@ -464,22 +484,10 @@ bool verify_ssl_fingerprint(sslclient_context *ssl_client, const char* fp, const
         fingerprint_local[i] = low | (high << 4);
     }
 
-    // Get certificate provided by the peer
-    const mbedtls_x509_crt* crt = mbedtls_ssl_get_peer_cert(&ssl_client->ssl_ctx);
-
-    if (!crt)
-    {
-        log_d("could not fetch peer certificate");
-        return false;
-    }
-
     // Calculate certificate's SHA256 fingerprint
     uint8_t fingerprint_remote[32];
-    mbedtls_sha256_context sha256_ctx;
-    mbedtls_sha256_init(&sha256_ctx);
-    mbedtls_sha256_starts(&sha256_ctx, false);
-    mbedtls_sha256_update(&sha256_ctx, crt->raw.p, crt->raw.len);
-    mbedtls_sha256_finish(&sha256_ctx, fingerprint_remote);
+    if(!get_peer_fingerprint(ssl_client, fingerprint_remote)) 
+        return false;
 
     // Check if fingerprints match
     if (memcmp(fingerprint_local, fingerprint_remote, 32))
@@ -493,6 +501,28 @@ bool verify_ssl_fingerprint(sslclient_context *ssl_client, const char* fp, const
         return verify_ssl_dn(ssl_client, domain_name);
     else
         return true;
+}
+
+bool get_peer_fingerprint(sslclient_context *ssl_client, uint8_t sha256[32]) 
+{
+    if (!ssl_client) {
+        log_d("Invalid ssl_client pointer");
+        return false;
+    };
+
+    const mbedtls_x509_crt* crt = mbedtls_ssl_get_peer_cert(&ssl_client->ssl_ctx);
+    if (!crt) {
+        log_d("Failed to get peer cert.");
+        return false;
+    };
+
+    mbedtls_sha256_context sha256_ctx;
+    mbedtls_sha256_init(&sha256_ctx);
+    mbedtls_sha256_starts(&sha256_ctx, false);
+    mbedtls_sha256_update(&sha256_ctx, crt->raw.p, crt->raw.len);
+    mbedtls_sha256_finish(&sha256_ctx, sha256);
+
+    return true;
 }
 
 // Checks if peer certificate has specified domain in CN or SANs
