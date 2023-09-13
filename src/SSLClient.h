@@ -81,7 +81,6 @@ public:
     void setClient(Client* client);
     void setAlpnProtocols(const char **alpn_protos);
 
-    int setTimeout(uint32_t seconds);
     void setCACertBundle(const uint8_t * bundle);
 
     const mbedtls_x509_crt* getPeerCertificate() { return mbedtls_ssl_get_peer_cert(&sslclient->ssl_ctx); };

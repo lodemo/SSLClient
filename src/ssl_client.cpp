@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <string>
 #include "ssl_client.h"
+#include "esp_crt_bundle.h"
 
 //#define ARDUHAL_LOG_LEVEL 5
 //#include <esp32-hal-log.h>

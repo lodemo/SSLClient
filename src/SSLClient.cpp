@@ -127,7 +127,7 @@ int SSLClient::connect(const char *host, uint16_t port, const char *_CA_cert, co
 }
 
 int SSLClient::connect(IPAddress ip, uint16_t port, const char *pskIdent, const char *psKey) {
-    return connect(ip.toString().c_str(), port,_pskIdent, _psKey);
+    return connect(ip.toString().c_str(), port, pskIdent, psKey);
 }
 
 int SSLClient::connect(const char *host, uint16_t port, const char *pskIdent, const char *psKey) {
@@ -135,7 +135,7 @@ int SSLClient::connect(const char *host, uint16_t port, const char *pskIdent, co
     if(_timeout > 0){
         sslclient->handshake_timeout = _timeout;
     }
-    int ret = SSLClientContext::start_ssl_client(sslclient, host, port, _timeout, NULL, NULL, NULL, _pskIdent, _psKey, _use_insecure, _alpn_protos);
+    int ret = SSLClientContext::start_ssl_client(sslclient, host, port, _timeout, NULL, false, NULL, NULL, pskIdent, psKey, _use_insecure, _alpn_protos);
     _lastError = ret;
     if (ret < 0) {
         log_e("start_ssl_client: %d", ret);
@@ -234,7 +234,7 @@ uint8_t SSLClient::connected()
     return _connected;
 }
 
-void WiFiClientSecure::setInsecure()
+void SSLClient::setInsecure()
 {
     _CA_cert = NULL;
     _cert = NULL;
@@ -251,7 +251,7 @@ void SSLClient::setCACert (const char *rootCA)
     _use_insecure = false;
 }
 
-void WiFiClientSecure::setCACertBundle(const uint8_t * bundle)
+void SSLClient::setCACertBundle(const uint8_t * bundle)
 {
     if (bundle != NULL)
     {
@@ -351,7 +351,7 @@ void SSLClient::setHandshakeTimeout(unsigned long handshake_timeout)
     sslclient->handshake_timeout = handshake_timeout * 1000;
 }
 
-void WiFiClientSecure::setAlpnProtocols(const char **alpn_protos)
+void SSLClient::setAlpnProtocols(const char **alpn_protos)
 {
     _alpn_protos = alpn_protos;
 }
