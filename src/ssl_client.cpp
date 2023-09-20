@@ -375,7 +375,8 @@ void stop_ssl_socket(sslclient_context *ssl_client, const char *rootCABuff, cons
     mbedtls_entropy_free(&ssl_client->entropy_ctx);
 
     // reset embedded pointers to zero
-    memset(ssl_client, 0, sizeof(sslclient_context));
+    // For some reason this results in bugs while reconnecting
+    // memset(ssl_client, 0, sizeof(sslclient_context));
 }
 
 
